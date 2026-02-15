@@ -1,3 +1,7 @@
+# systemd unit for openclaw-proxy.
+# Starts the OpenAI-compatible API proxy after the OpenClaw gateway.
+# Install to ~/.config/systemd/user/ for user-level service.
+
 [Unit]
 Description=OpenClaw API Proxy (OpenAI-compatible)
 After=network-online.target openclaw.service

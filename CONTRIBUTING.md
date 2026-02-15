@@ -1,21 +1,14 @@
-# Contributing to openclaw-on-rpi
+# Contributing
 
-Thanks for your interest in contributing! This project aims to make it dead simple to run AI agents on Raspberry Pi hardware.
+Thanks for your interest. This project aims to make it dead simple to run AI agents on Raspberry Pi hardware.
 
-## How to Contribute
-
-### Reporting Issues
+## Reporting Issues
 
 - Check [existing issues](https://github.com/hackur/openclaw-on-rpi/issues) first
 - Include your Pi model, OS version, and RAM size
 - Paste relevant error output
 
-### Suggesting Features
-
-- Open an issue with the `enhancement` label
-- Describe your use case — what are you trying to automate?
-
-### Pull Requests
+## Pull Requests
 
 1. Fork the repo
 2. Create a feature branch (`git checkout -b feature/my-feature`)
@@ -23,26 +16,24 @@ Thanks for your interest in contributing! This project aims to make it dead simp
 4. Keep scripts POSIX-compatible where possible
 5. Submit a PR with a clear description
 
-### Testing
+## Code Style
 
-If you have a Raspberry Pi available:
-
-```bash
-# Test provisioning
-./openclaw-rpi provision <your-pi-ip>
-
-# Test verification
-./openclaw-rpi verify <your-pi-ip>
-```
-
-### Code Style
-
-- Shell scripts: use `set -euo pipefail`
+- Shell scripts: `set -euo pipefail`
 - Quote variables: `"$VAR"` not `$VAR`
 - Use functions for logical grouping
 - Add comments for non-obvious logic
+- No emoji in code or output strings
 
-## Hardware We'd Love to Support
+## Testing
+
+If you have a Pi available:
+
+```bash
+./openclaw-rpi provision <your-pi-ip>
+./openclaw-rpi verify <your-pi-ip>
+```
+
+## Hardware Support
 
 - [x] Raspberry Pi 4B (4GB / 8GB)
 - [ ] Raspberry Pi 5
@@ -52,11 +43,11 @@ If you have a Raspberry Pi available:
 
 ## Areas That Need Help
 
-- **Testing on Pi 5** — we've only tested on 4B
-- **Non-Mac host support** — provisioning from Linux/Windows
-- **Ollama model benchmarks** — which models run well on which Pi?
-- **Chat integration guides** — Discord, Telegram, Signal setup walkthroughs
-- **Ansible/cloud-init alternative** — for fleet provisioning
+- **Pi 5 testing** -- only tested on 4B so far
+- **Non-Mac host support** -- provisioning from Linux/Windows
+- **Ollama model benchmarks** -- which models run well on which Pi
+- **Chat integration guides** -- Discord, Telegram, Signal setup walkthroughs
+- **Ansible/cloud-init alternative** -- for fleet provisioning
 
 ## Code of Conduct
 

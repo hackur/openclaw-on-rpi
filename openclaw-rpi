@@ -1,33 +1,44 @@
 #!/usr/bin/env bash
 #
-# openclaw-rpi — Provision a Raspberry Pi as an OpenClaw AI agent
+# openclaw-rpi - Provision and manage a Raspberry Pi running OpenClaw.
+#
+# Connects to a Pi over SSH, installs all dependencies, configures the
+# OpenClaw agent runtime, and sets up an OpenAI-compatible API proxy.
+#
+# Usage: openclaw-rpi <command> [ip-address]
+# See:   openclaw-rpi help
 #
 set -euo pipefail
 
-VERSION="1.0.0"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly VERSION="1.0.0"
+readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Defaults (override via env or flags)
+# ---------------------------------------------------------------------------
+# Configuration (override via environment)
+# ---------------------------------------------------------------------------
+
 PI_USER="${PI_USER:-pi}"
 PI_HOSTNAME="${PI_HOSTNAME:-openclaw-pi}"
 OLLAMA_MODELS="${OLLAMA_MODELS:-qwen2.5:1.5b gemma2:2b}"
 SKIP_DOCKER="${SKIP_DOCKER:-0}"
 INSTALL_OLLAMA="${INSTALL_OLLAMA:-0}"
 
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-BOLD='\033[1m'
-NC='\033[0m'
+# ---------------------------------------------------------------------------
+# Output helpers
+# ---------------------------------------------------------------------------
 
-log()  { echo -e "${GREEN}✓${NC} $*"; }
-info() { echo -e "${BLUE}→${NC} $*"; }
-warn() { echo -e "${YELLOW}⚠${NC} $*"; }
-err()  { echo -e "${RED}✗${NC} $*" >&2; }
-header() { echo -e "\n${BOLD}${CYAN}$*${NC}\n"; }
+readonly RED='\033[0;31m' GREEN='\033[0;32m' YELLOW='\033[1;33m'
+readonly BLUE='\033[0;34m' CYAN='\033[0;36m' BOLD='\033[1m' NC='\033[0m'
+
+log()    { echo -e "${GREEN}+${NC} $*"; }
+info()   { echo -e "${BLUE}>${NC} $*"; }
+warn()   { echo -e "${YELLOW}!${NC} $*"; }
+err()    { echo -e "${RED}x${NC} $*" >&2; }
+header() { echo -e "\n${BOLD}${CYAN}--- $* ---${NC}\n"; }
+
+# ---------------------------------------------------------------------------
+# SSH / SCP wrappers
+# ---------------------------------------------------------------------------
 
 ssh_cmd() {
     local ip="$1"; shift
@@ -39,6 +50,7 @@ scp_to() {
     scp -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new "$src" "$PI_USER@$ip:$dst"
 }
 
+# Validate that an IP argument was provided.
 require_ip() {
     if [[ -z "${1:-}" ]]; then
         err "Missing Pi IP address"
@@ -47,10 +59,11 @@ require_ip() {
     fi
 }
 
+# Poll SSH until the host responds or we hit the retry limit.
 wait_for_ssh() {
     local ip="$1" max="${2:-30}"
     info "Waiting for SSH on $ip..."
-    for i in $(seq 1 "$max"); do
+    for _ in $(seq 1 "$max"); do
         if ssh_cmd "$ip" "true" 2>/dev/null; then
             log "SSH connected"
             return 0
@@ -62,62 +75,67 @@ wait_for_ssh() {
     return 1
 }
 
-# ─── Commands ─────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Commands
+# ---------------------------------------------------------------------------
 
+# Print step-by-step instructions for flashing an SD card with RPi OS Lite.
 cmd_flash() {
-    header "🔧 OpenClaw RPi — SD Card Preparation"
+    header "SD Card Preparation"
 
-    echo "This wizard guides you through flashing Raspberry Pi OS."
-    echo ""
     echo "1. Open Raspberry Pi Imager:"
     echo "   ${BOLD}brew install --cask raspberry-pi-imager && open -a 'Raspberry Pi Imager'${NC}"
     echo ""
     echo "2. Select:"
-    echo "   • Device: Raspberry Pi 4"
-    echo "   • OS: Raspberry Pi OS Lite (64-bit) — under 'Raspberry Pi OS (other)'"
-    echo "   • Storage: Your SD card"
+    echo "   - Device: Raspberry Pi 4 (or 5)"
+    echo "   - OS: Raspberry Pi OS Lite (64-bit), under 'Raspberry Pi OS (other)'"
+    echo "   - Storage: Your SD card"
     echo ""
-    echo "3. Click the Settings gear icon and configure:"
-    echo "   • Hostname: ${BOLD}${PI_HOSTNAME}${NC}"
-    echo "   • Enable SSH → Use public key authentication"
-    echo "   • Username: ${BOLD}${PI_USER}${NC}"
+    echo "3. Click the Settings gear and configure:"
+    echo "   - Hostname: ${BOLD}${PI_HOSTNAME}${NC}"
+    echo "   - Enable SSH with public key authentication"
+    echo "   - Username: ${BOLD}${PI_USER}${NC}"
     if [[ -n "${WIFI_SSID:-}" ]]; then
-        echo "   • WiFi SSID: ${BOLD}${WIFI_SSID}${NC}"
+        echo "   - WiFi SSID: ${BOLD}${WIFI_SSID}${NC}"
     else
-        echo "   • WiFi: Configure your network credentials"
+        echo "   - WiFi: enter your network credentials"
     fi
-    echo "   • Timezone: $(date +%Z)"
+    echo "   - Timezone: $(date +%Z)"
     echo ""
-    echo "4. Flash the card, insert into Pi, power on"
+    echo "4. Flash, insert into Pi, power on."
     echo ""
-    echo "5. Find the Pi on your network:"
+    echo "5. Find the Pi:"
     echo "   ${BOLD}arp -na | grep -i 'b8:27:eb\|dc:a6:32\|e4:5f:01\|2c:cf:67\|d8:3a:dd'${NC}"
-    echo "   or: ${BOLD}ping ${PI_HOSTNAME}.local${NC}"
+    echo "   ${BOLD}ping ${PI_HOSTNAME}.local${NC}"
 }
 
+# Upload and execute the provisioning script on the Pi, then reboot.
 cmd_provision() {
     local ip="$1"
-    header "🚀 OpenClaw RPi — Provisioning $PI_USER@$ip"
+    header "Provisioning $PI_USER@$ip"
 
     wait_for_ssh "$ip"
 
     info "Uploading provisioning script..."
     scp_to "$ip" "$SCRIPT_DIR/scripts/provision.sh" "/tmp/openclaw-provision.sh"
 
-    info "Running provisioning (this takes 10-15 minutes)..."
-    ssh_cmd "$ip" "SKIP_DOCKER=$SKIP_DOCKER INSTALL_OLLAMA=$INSTALL_OLLAMA OLLAMA_MODELS='$OLLAMA_MODELS' bash /tmp/openclaw-provision.sh"
+    info "Running provisioning (10-15 minutes)..."
+    ssh_cmd "$ip" \
+        "SKIP_DOCKER=$SKIP_DOCKER INSTALL_OLLAMA=$INSTALL_OLLAMA OLLAMA_MODELS='$OLLAMA_MODELS' \
+         bash /tmp/openclaw-provision.sh"
 
-    log "Provisioning complete!"
-    warn "The Pi needs to reboot for group changes (docker, zsh). Rebooting..."
+    log "Provisioning complete"
+    warn "Rebooting for group and shell changes..."
     ssh_cmd "$ip" "sudo reboot" 2>/dev/null || true
     sleep 5
     wait_for_ssh "$ip" 60
     log "Pi is back online"
 }
 
+# Upload and run the interactive configuration wizard on the Pi.
 cmd_configure() {
     local ip="$1"
-    header "⚙️  OpenClaw RPi — Configuration $PI_USER@$ip"
+    header "Configuration $PI_USER@$ip"
 
     info "Uploading configuration script..."
     scp_to "$ip" "$SCRIPT_DIR/scripts/configure.sh" "/tmp/openclaw-configure.sh"
@@ -126,12 +144,14 @@ cmd_configure() {
     ssh -t -o ConnectTimeout=10 "$PI_USER@$ip" "bash /tmp/openclaw-configure.sh"
 }
 
+# Run a series of checks to verify the Pi is correctly provisioned.
 cmd_verify() {
     local ip="$1"
-    header "🔍 OpenClaw RPi — Verification $PI_USER@$ip"
+    header "Verification $PI_USER@$ip"
 
     local pass=0 fail=0
 
+    # Run a single check: name, command. Increments pass/fail counters.
     check() {
         local name="$1" cmd="$2"
         if ssh_cmd "$ip" "$cmd" &>/dev/null; then
@@ -161,11 +181,10 @@ cmd_verify() {
         check "Ollama running"    "curl -sf http://localhost:11434/api/tags"
     fi
 
-    # System info
     echo ""
     info "System info:"
     ssh_cmd "$ip" "
-        echo \"  OS:     \$(cat /etc/os-release | grep PRETTY_NAME | cut -d= -f2 | tr -d '\"')\"
+        echo \"  OS:     \$(grep PRETTY_NAME /etc/os-release | cut -d= -f2 | tr -d '\"')\"
         echo \"  Arch:   \$(uname -m)\"
         echo \"  Kernel: \$(uname -r)\"
         echo \"  Memory: \$(free -h | awk '/Mem:/ {print \$2}') total, \$(free -h | awk '/Mem:/ {print \$7}') available\"
@@ -175,104 +194,109 @@ cmd_verify() {
 
     echo ""
     if [[ $fail -eq 0 ]]; then
-        log "All $pass checks passed!"
+        log "All $pass checks passed"
     else
         warn "$pass passed, $fail failed"
     fi
 }
 
+# Run the full pipeline: provision, configure, verify.
 cmd_setup() {
     local ip="$1"
-    header "🎯 OpenClaw RPi — Full Setup Pipeline"
+    header "Full Setup"
     cmd_provision "$ip"
     cmd_configure "$ip"
     cmd_verify "$ip"
     echo ""
-    log "Setup complete! SSH in: ${BOLD}ssh $PI_USER@$ip${NC}"
+    log "Done. SSH in: ${BOLD}ssh $PI_USER@$ip${NC}"
 }
 
+# SSH directly into the Pi.
 cmd_ssh() {
     local ip="$1"
     ssh -o StrictHostKeyChecking=accept-new "$PI_USER@$ip"
 }
 
+# Print OpenClaw and system status from the Pi.
 cmd_status() {
     local ip="$1"
-    header "📊 OpenClaw RPi — Status $ip"
+    header "Status $ip"
     ssh_cmd "$ip" "
         source ~/.nvm/nvm.sh 2>/dev/null
-        echo '── OpenClaw ──'
+        echo '-- OpenClaw --'
         openclaw status 2>/dev/null || echo 'Not running'
         echo ''
-        echo '── System ──'
+        echo '-- System --'
         echo \"Uptime: \$(uptime -p)\"
         echo \"Memory: \$(free -h | awk '/Mem:/ {printf \"%s / %s\", \$3, \$2}')\"
         echo \"Disk:   \$(df -h / | awk 'NR==2 {printf \"%s / %s (%s)\", \$3, \$2, \$5}')\"
-        echo \"Load:   \$(cat /proc/loadavg | cut -d' ' -f1-3)\"
+        echo \"Load:   \$(cut -d' ' -f1-3 /proc/loadavg)\"
         echo \"Temp:   \$(vcgencmd measure_temp 2>/dev/null | cut -d= -f2 || echo 'N/A')\"
     "
 }
 
+# Tail the OpenClaw systemd journal on the Pi.
 cmd_logs() {
     local ip="$1"
     info "Tailing OpenClaw logs on $ip (Ctrl+C to stop)..."
-    ssh_cmd "$ip" "journalctl --user -u openclaw -f 2>/dev/null || echo 'No systemd service found. Check: openclaw gateway status'"
+    ssh_cmd "$ip" "journalctl --user -u openclaw -f 2>/dev/null \
+        || echo 'No systemd service found. Try: openclaw gateway status'"
 }
 
+# Update system packages, OpenClaw, and (optionally) Ollama on the Pi.
 cmd_update() {
     local ip="$1"
-    header "🔄 OpenClaw RPi — Update $ip"
+    header "Update $ip"
     ssh_cmd "$ip" "
         source ~/.nvm/nvm.sh
-        echo '── System packages ──'
+        echo '-- System packages --'
         sudo apt-get update -qq && sudo apt-get upgrade -y -qq
         echo ''
-        echo '── OpenClaw ──'
+        echo '-- OpenClaw --'
         npm update -g openclaw 2>/dev/null || echo 'Update via: openclaw gateway update.run'
-        echo ''
-        echo '── Ollama ──'
-        curl -fsSL https://ollama.com/install.sh | sh 2>/dev/null || true
     "
     log "Update complete"
 }
 
+# Verify that headless Chromium works on the Pi.
 cmd_browser_test() {
     local ip="$1"
-    header "🌐 OpenClaw RPi — Browser Test $ip"
+    header "Browser Test $ip"
     ssh_cmd "$ip" "
-        echo 'Testing Chromium headless...'
         CHROME=\$(which chromium 2>/dev/null || which chromium-browser 2>/dev/null)
         if [ -z \"\$CHROME\" ]; then
-            echo '✗ Chromium not found'
+            echo 'FAIL: Chromium not found'
             exit 1
         fi
-        echo \"Binary: \$CHROME\"
+        echo \"Binary:  \$CHROME\"
         echo \"Version: \$(\$CHROME --version)\"
         echo ''
         echo 'Fetching example.com...'
         timeout 15 \$CHROME --headless --disable-gpu --dump-dom https://example.com 2>/dev/null | head -5
         echo ''
-        echo '✓ Browser is working'
+        echo 'OK'
     "
 }
 
+# Print usage information.
 cmd_help() {
     cat << EOF
-${BOLD}openclaw-rpi${NC} v${VERSION} — Provision a Raspberry Pi as an OpenClaw AI agent
+${BOLD}openclaw-rpi${NC} v${VERSION}
+Provision a Raspberry Pi as an OpenClaw AI agent.
 
 ${BOLD}USAGE${NC}
-    openclaw-rpi <command> [ip-address] [options]
+    openclaw-rpi <command> [ip-address]
 
 ${BOLD}COMMANDS${NC}
-    flash                Interactive SD card flashing guide
+    flash                SD card flashing guide
     provision <ip>       Install all dependencies on the Pi
     configure <ip>       Interactive OpenClaw configuration
-    verify <ip>          Health check — verify everything works
+    verify <ip>          Health check
     setup <ip>           Full pipeline: provision + configure + verify
     ssh <ip>             SSH into the Pi
-    status <ip>          Check OpenClaw and system status
+    status <ip>          OpenClaw and system status
     logs <ip>            Tail OpenClaw logs
-    update <ip>          Update OpenClaw + system packages
+    update <ip>          Update system packages and OpenClaw
     browser-test <ip>    Test headless Chromium
     help                 Show this help
 
@@ -280,17 +304,19 @@ ${BOLD}ENVIRONMENT${NC}
     PI_USER              SSH username (default: pi)
     PI_HOSTNAME          Pi hostname (default: openclaw-pi)
     SKIP_DOCKER=1        Skip Docker installation
-    INSTALL_OLLAMA=1     Opt-in to install Ollama for local models
-    OLLAMA_MODELS        Space-separated models to pull (if Ollama enabled)
+    INSTALL_OLLAMA=1     Opt-in: install Ollama for local inference
+    OLLAMA_MODELS        Space-separated model names (requires INSTALL_OLLAMA=1)
 
 ${BOLD}EXAMPLES${NC}
     openclaw-rpi setup 192.168.1.100
     PI_USER=jeremy openclaw-rpi provision 10.0.0.50
-    SKIP_OLLAMA=1 openclaw-rpi provision 192.168.1.100
+    SKIP_DOCKER=1 openclaw-rpi provision 192.168.1.100
 EOF
 }
 
-# ─── Main ─────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
 
 CMD="${1:-help}"
 shift || true

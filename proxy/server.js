@@ -1,22 +1,30 @@
 #!/usr/bin/env node
 /**
- * openclaw-proxy — OpenAI-compatible API server that routes through OpenClaw
+ * openclaw-proxy - OpenAI-compatible API server backed by an OpenClaw agent.
  *
- * Exposes the OpenClaw agent as a local network LLM endpoint.
- * Any app that speaks OpenAI API can use your Pi agent — with full
- * browser control, tool use, memory, and chat integrations.
+ * Exposes /v1/chat/completions (OpenAI) and /api/chat (Ollama) endpoints
+ * that route requests through the local OpenClaw Gateway. Any client that
+ * speaks the OpenAI protocol can use the agent, including Open WebUI,
+ * the Python openai SDK, curl, and Ollama-compatible tools.
  *
- * Usage:
- *   node server.js                          # localhost:11435
- *   PORT=8080 node server.js                # custom port
- *   OPENCLAW_HOST=192.168.1.50 node server.js  # remote gateway
- *   BIND=0.0.0.0 node server.js             # expose to network
+ * The key difference from a raw LLM endpoint: this has an agent behind it
+ * with browser access, shell access, and tools. It can act, not just talk.
+ *
+ * Environment:
+ *   PORT            Listen port (default: 11435)
+ *   BIND            Bind address (default: 0.0.0.0)
+ *   OPENCLAW_HOST   Gateway host (default: 127.0.0.1)
+ *   OPENCLAW_PORT   Gateway port (default: 18800)
+ *   OPENCLAW_TOKEN  Gateway auth token (optional)
+ *   MODEL_NAME      Model name exposed to clients (default: openclaw-agent)
  */
 
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 
-// ── Config ───────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Configuration
+// ---------------------------------------------------------------------------
 
 const PORT = parseInt(process.env.PORT || "11435", 10);
 const BIND = process.env.BIND || "0.0.0.0";
@@ -24,18 +32,21 @@ const OPENCLAW_HOST = process.env.OPENCLAW_HOST || "127.0.0.1";
 const OPENCLAW_PORT = parseInt(process.env.OPENCLAW_PORT || "18800", 10);
 const OPENCLAW_TOKEN = process.env.OPENCLAW_TOKEN || "";
 const MODEL_NAME = process.env.MODEL_NAME || "openclaw-agent";
-const MAX_BODY = 1024 * 1024; // 1MB
+const MAX_BODY = 1024 * 1024; // 1MB request body limit
 
-// ── Helpers ──────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// HTTP helpers
+// ---------------------------------------------------------------------------
+
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+};
 
 function jsonResponse(res, status, data) {
   const body = JSON.stringify(data);
-  res.writeHead(status, {
-    "Content-Type": "application/json",
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  });
+  res.writeHead(status, { "Content-Type": "application/json", ...CORS_HEADERS });
   res.end(body);
 }
 
@@ -43,6 +54,16 @@ function sseChunk(res, data) {
   res.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
+function openaiError(res, status, message, type = "invalid_request_error") {
+  jsonResponse(res, status, {
+    error: { message, type, param: null, code: null },
+  });
+}
+
+/**
+ * Read the full request body, enforcing MAX_BODY size.
+ * Rejects if the body exceeds the limit.
+ */
 function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -50,7 +71,7 @@ function readBody(req) {
     req.on("data", (chunk) => {
       size += chunk.length;
       if (size > MAX_BODY) {
-        reject(new Error("Body too large"));
+        reject(new Error("Request body too large"));
         req.destroy();
         return;
       }
@@ -61,18 +82,20 @@ function readBody(req) {
   });
 }
 
-function openaiError(res, status, message, type = "invalid_request_error") {
-  jsonResponse(res, status, {
-    error: { message, type, param: null, code: null },
-  });
-}
+// ---------------------------------------------------------------------------
+// OpenClaw Gateway client
+// ---------------------------------------------------------------------------
 
-// ── OpenClaw Gateway Client ─────────────────────────────
-
+/**
+ * Send a message to the OpenClaw Gateway and wait for a reply.
+ * Uses the sessions/send endpoint which creates or reuses a labeled session.
+ */
 async function sendToGateway(message, sessionLabel) {
   const url = `http://${OPENCLAW_HOST}:${OPENCLAW_PORT}/api/sessions/send`;
   const headers = { "Content-Type": "application/json" };
-  if (OPENCLAW_TOKEN) headers["Authorization"] = `Bearer ${OPENCLAW_TOKEN}`;
+  if (OPENCLAW_TOKEN) {
+    headers["Authorization"] = `Bearer ${OPENCLAW_TOKEN}`;
+  }
 
   const resp = await fetch(url, {
     method: "POST",
@@ -93,56 +116,53 @@ async function sendToGateway(message, sessionLabel) {
   return data.reply || data.message || data.text || JSON.stringify(data);
 }
 
-async function listGatewayModels() {
-  // Try to get info from gateway, fall back to static
-  try {
-    const url = `http://${OPENCLAW_HOST}:${OPENCLAW_PORT}/api/status`;
-    const headers = {};
-    if (OPENCLAW_TOKEN) headers["Authorization"] = `Bearer ${OPENCLAW_TOKEN}`;
-    const resp = await fetch(url, { headers, signal: AbortSignal.timeout(3000) });
-    if (resp.ok) {
-      const data = await resp.json();
-      return data.model || MODEL_NAME;
-    }
-  } catch {}
-  return MODEL_NAME;
-}
+// ---------------------------------------------------------------------------
+// Message formatting
+// ---------------------------------------------------------------------------
 
-// ── Message Formatting ──────────────────────────────────
-
+/**
+ * Convert an OpenAI-style messages array into a single text prompt
+ * suitable for the Gateway session. System messages become bracketed
+ * context; user and assistant messages are preserved as conversation.
+ */
 function formatMessages(messages) {
   if (!Array.isArray(messages)) return String(messages);
 
-  // Collapse message array into a single prompt
-  // System messages become context, user/assistant become conversation
-  const parts = [];
-  for (const msg of messages) {
-    const role = msg.role || "user";
-    const content =
-      typeof msg.content === "string"
-        ? msg.content
-        : Array.isArray(msg.content)
-          ? msg.content
-              .filter((p) => p.type === "text")
-              .map((p) => p.text)
-              .join("\n")
-          : JSON.stringify(msg.content);
+  return messages
+    .map((msg) => {
+      const role = msg.role || "user";
 
-    if (role === "system") {
-      parts.push(`[System] ${content}`);
-    } else if (role === "assistant") {
-      parts.push(`[Assistant] ${content}`);
-    } else {
-      parts.push(content);
-    }
-  }
-  return parts.join("\n\n");
+      // Handle multimodal content arrays (text parts only).
+      const content =
+        typeof msg.content === "string"
+          ? msg.content
+          : Array.isArray(msg.content)
+            ? msg.content
+                .filter((p) => p.type === "text")
+                .map((p) => p.text)
+                .join("\n")
+            : JSON.stringify(msg.content);
+
+      if (role === "system") return `[System] ${content}`;
+      if (role === "assistant") return `[Assistant] ${content}`;
+      return content;
+    })
+    .join("\n\n");
 }
 
-// ── Route Handlers ──────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Route handlers
+// ---------------------------------------------------------------------------
 
+/**
+ * POST /v1/chat/completions
+ *
+ * Implements the OpenAI chat completions API. Supports both streaming
+ * (SSE) and non-streaming responses. The model field is accepted but
+ * ignored since all requests route to the same OpenClaw agent.
+ */
 async function handleChatCompletions(req, res, body) {
-  const { messages, stream, model, temperature, max_tokens } = body;
+  const { messages, stream, model } = body;
 
   if (!messages || !Array.isArray(messages)) {
     return openaiError(res, 400, "messages is required and must be an array");
@@ -154,37 +174,29 @@ async function handleChatCompletions(req, res, body) {
   const created = Math.floor(Date.now() / 1000);
 
   if (stream) {
-    // ── Streaming response ──
     res.writeHead(200, {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
       Connection: "keep-alive",
-      "Access-Control-Allow-Origin": "*",
+      ...CORS_HEADERS,
     });
 
     try {
       const reply = await sendToGateway(prompt, sessionLabel);
 
-      // Simulate streaming by chunking the response
-      const chunkSize = 4; // ~4 chars per token, feels natural
+      // Chunk the reply into small pieces to simulate token-by-token streaming.
+      const chunkSize = 4;
       for (let i = 0; i < reply.length; i += chunkSize) {
-        const text = reply.slice(i, i + chunkSize);
         sseChunk(res, {
           id: requestId,
           object: "chat.completion.chunk",
           created,
           model: model || MODEL_NAME,
-          choices: [
-            {
-              index: 0,
-              delta: { content: text },
-              finish_reason: null,
-            },
-          ],
+          choices: [{ index: 0, delta: { content: reply.slice(i, i + chunkSize) }, finish_reason: null }],
         });
       }
 
-      // Final chunk
+      // Send the final chunk with finish_reason.
       sseChunk(res, {
         id: requestId,
         object: "chat.completion.chunk",
@@ -199,46 +211,45 @@ async function handleChatCompletions(req, res, body) {
         object: "chat.completion.chunk",
         created,
         model: model || MODEL_NAME,
-        choices: [
-          {
-            index: 0,
-            delta: { content: `Error: ${err.message}` },
-            finish_reason: "stop",
-          },
-        ],
+        choices: [{ index: 0, delta: { content: `Error: ${err.message}` }, finish_reason: "stop" }],
       });
       res.write("data: [DONE]\n\n");
     }
     res.end();
-  } else {
-    // ── Non-streaming response ──
-    try {
-      const reply = await sendToGateway(prompt, sessionLabel);
+    return;
+  }
 
-      jsonResponse(res, 200, {
-        id: requestId,
-        object: "chat.completion",
-        created,
-        model: model || MODEL_NAME,
-        choices: [
-          {
-            index: 0,
-            message: { role: "assistant", content: reply },
-            finish_reason: "stop",
-          },
-        ],
-        usage: {
-          prompt_tokens: Math.ceil(prompt.length / 4),
-          completion_tokens: Math.ceil(reply.length / 4),
-          total_tokens: Math.ceil((prompt.length + reply.length) / 4),
+  // Non-streaming: wait for the full reply, return as a single object.
+  try {
+    const reply = await sendToGateway(prompt, sessionLabel);
+
+    jsonResponse(res, 200, {
+      id: requestId,
+      object: "chat.completion",
+      created,
+      model: model || MODEL_NAME,
+      choices: [
+        {
+          index: 0,
+          message: { role: "assistant", content: reply },
+          finish_reason: "stop",
         },
-      });
-    } catch (err) {
-      openaiError(res, 502, `Gateway error: ${err.message}`, "api_error");
-    }
+      ],
+      usage: {
+        prompt_tokens: Math.ceil(prompt.length / 4),
+        completion_tokens: Math.ceil(reply.length / 4),
+        total_tokens: Math.ceil((prompt.length + reply.length) / 4),
+      },
+    });
+  } catch (err) {
+    openaiError(res, 502, `Gateway error: ${err.message}`, "api_error");
   }
 }
 
+/**
+ * GET /v1/models
+ * Returns the list of available "models" (just the agent name).
+ */
 function handleModels(req, res) {
   jsonResponse(res, 200, {
     object: "list",
@@ -250,17 +261,39 @@ function handleModels(req, res) {
         owned_by: "openclaw",
         permission: [],
       },
+    ],
+  });
+}
+
+/**
+ * GET /api/tags
+ * Ollama-compatible model listing.
+ */
+function handleOllamaTags(req, res) {
+  jsonResponse(res, 200, {
+    models: [
       {
-        id: "openclaw-agent-browser",
-        object: "model",
-        created: 1700000000,
-        owned_by: "openclaw",
-        permission: [],
+        name: MODEL_NAME,
+        model: MODEL_NAME,
+        modified_at: new Date().toISOString(),
+        size: 0,
+        digest: "openclaw",
+        details: {
+          parent_model: "",
+          format: "agent",
+          family: "openclaw",
+          parameter_size: "cloud",
+          quantization_level: "none",
+        },
       },
     ],
   });
 }
 
+/**
+ * GET /health
+ * Basic health check with uptime and gateway info.
+ */
 function handleHealth(req, res) {
   jsonResponse(res, 200, {
     status: "ok",
@@ -271,7 +304,9 @@ function handleHealth(req, res) {
   });
 }
 
-// ── Server ──────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Server
+// ---------------------------------------------------------------------------
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
@@ -279,28 +314,15 @@ const server = createServer(async (req, res) => {
 
   // CORS preflight
   if (req.method === "OPTIONS") {
-    res.writeHead(204, {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization",
-      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    });
+    res.writeHead(204, CORS_HEADERS);
     return res.end();
-  }
-
-  // Auth check (optional)
-  if (OPENCLAW_TOKEN) {
-    const auth = req.headers.authorization || "";
-    const token = auth.replace(/^Bearer\s+/i, "");
-    // Accept either the gateway token or any non-empty key
-    // (we're the proxy, the gateway does real auth)
   }
 
   try {
     // OpenAI-compatible endpoints
     if (path === "/v1/chat/completions" && req.method === "POST") {
       const raw = await readBody(req);
-      const body = JSON.parse(raw);
-      return handleChatCompletions(req, res, body);
+      return handleChatCompletions(req, res, JSON.parse(raw));
     }
 
     if (path === "/v1/models" && req.method === "GET") {
@@ -311,8 +333,8 @@ const server = createServer(async (req, res) => {
     if (path === "/api/chat" && req.method === "POST") {
       const raw = await readBody(req);
       const body = JSON.parse(raw);
-      // Convert Ollama format to OpenAI format
-      body.messages = body.messages || [];
+      // Normalize Ollama format: move prompt into messages if needed.
+      if (!body.messages) body.messages = [];
       if (body.prompt) {
         body.messages.push({ role: "user", content: body.prompt });
       }
@@ -320,33 +342,14 @@ const server = createServer(async (req, res) => {
     }
 
     if (path === "/api/tags" && req.method === "GET") {
-      // Ollama model list format
-      return jsonResponse(res, 200, {
-        models: [
-          {
-            name: MODEL_NAME,
-            model: MODEL_NAME,
-            modified_at: new Date().toISOString(),
-            size: 0,
-            digest: "openclaw",
-            details: {
-              parent_model: "",
-              format: "agent",
-              family: "openclaw",
-              parameter_size: "cloud",
-              quantization_level: "none",
-            },
-          },
-        ],
-      });
+      return handleOllamaTags(req, res);
     }
 
-    // Health / status
+    // Health check
     if (path === "/" || path === "/health" || path === "/v1") {
       return handleHealth(req, res);
     }
 
-    // 404
     openaiError(res, 404, `Unknown endpoint: ${req.method} ${path}`);
   } catch (err) {
     console.error(`[ERROR] ${req.method} ${path}:`, err.message);
@@ -355,36 +358,18 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(PORT, BIND, () => {
-  console.log(`
-╔══════════════════════════════════════════════════════╗
-║          🤖 OpenClaw Proxy v1.0.0                    ║
-╠══════════════════════════════════════════════════════╣
-║                                                      ║
-║  Listening:  http://${BIND}:${PORT.toString().padEnd(27)}║
-║  Gateway:    ${OPENCLAW_HOST}:${OPENCLAW_PORT.toString().padEnd(30)}║
-║  Model:      ${MODEL_NAME.padEnd(39)}║
-║                                                      ║
-║  OpenAI:     /v1/chat/completions                    ║
-║  OpenAI:     /v1/models                              ║
-║  Ollama:     /api/chat                               ║
-║  Ollama:     /api/tags                               ║
-║  Health:     /health                                 ║
-║                                                      ║
-╚══════════════════════════════════════════════════════╝
-
-Ready. Any OpenAI-compatible client can now use your agent:
-
-  curl http://$(BIND === "0.0.0.0" ? hostname() : BIND):${PORT}/v1/chat/completions \\
-    -H "Content-Type: application/json" \\
-    -d '{"model":"${MODEL_NAME}","messages":[{"role":"user","content":"hello"}]}'
-`
-    .replace("hostname()", "YOUR_PI_IP")
-    .replace("BIND ===", ""));
+  const addr = BIND === "0.0.0.0" ? "all interfaces" : BIND;
+  console.log(`openclaw-proxy v1.0.0`);
+  console.log(`  Listening on ${addr}, port ${PORT}`);
+  console.log(`  Gateway:     ${OPENCLAW_HOST}:${OPENCLAW_PORT}`);
+  console.log(`  Model:       ${MODEL_NAME}`);
+  console.log(`  Endpoints:   /v1/chat/completions, /v1/models, /api/chat, /api/tags, /health`);
+  console.log(``);
 });
 
 server.on("error", (err) => {
   if (err.code === "EADDRINUSE") {
-    console.error(`Port ${PORT} is already in use. Try: PORT=${PORT + 1} node server.js`);
+    console.error(`Port ${PORT} already in use. Try: PORT=${PORT + 1} node server.js`);
   } else {
     console.error("Server error:", err);
   }

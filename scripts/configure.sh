@@ -1,32 +1,45 @@
 #!/bin/bash
 #
-# configure.sh — Interactive OpenClaw configuration (runs ON THE PI)
+# configure.sh - Interactive OpenClaw configuration wizard.
+#
+# This script runs ON THE PI (uploaded via SCP by the openclaw-rpi CLI).
+# It walks through AI provider setup, browser verification, systemd
+# service creation, and API proxy enablement.
 #
 set -euo pipefail
 
-# Load nvm
+# Load nvm so node/npm/openclaw are on PATH.
 export NVM_DIR="$HOME/.nvm"
+# shellcheck source=/dev/null
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
 export PATH=~/.npm-global/bin:$PATH
 
-log()  { echo -e "\033[0;32m✓\033[0m $*"; }
-info() { echo -e "\033[0;34m→\033[0m $*"; }
-warn() { echo -e "\033[1;33m⚠\033[0m $*"; }
+# ---------------------------------------------------------------------------
+# Output helpers
+# ---------------------------------------------------------------------------
+
+log()  { echo -e "\033[0;32m+\033[0m $*"; }
+info() { echo -e "\033[0;34m>\033[0m $*"; }
+warn() { echo -e "\033[1;33m!\033[0m $*"; }
 
 echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  ⚙️  OpenClaw Configuration"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "--------------------------------------------"
+echo "  OpenClaw Configuration"
+echo "--------------------------------------------"
 echo ""
 
-# ── AI Provider ──────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# AI Provider
+#
+# The Pi calls cloud APIs for inference. This step saves the chosen
+# provider's API key to ~/.zshrc so it persists across sessions.
+# ---------------------------------------------------------------------------
 
-echo "The Pi calls cloud AI APIs — it doesn't run models locally."
-echo "Choose your provider (you can add more later):"
+echo "The Pi calls cloud APIs for inference. Choose a provider:"
 echo ""
-echo "  1) Claude (Anthropic) — Most capable, recommended"
-echo "  2) Gemini (Google)    — Free tier available"
-echo "  3) OpenAI (GPT-4o)   — Widely supported"
+echo "  1) Claude (Anthropic) - most capable, recommended"
+echo "  2) Gemini (Google)    - free tier available"
+echo "  3) OpenAI (GPT-4o)   - widely supported"
 echo "  4) Skip for now"
 echo ""
 read -p "Choice [1-4]: " AI_CHOICE
@@ -38,7 +51,7 @@ case "${AI_CHOICE:-4}" in
         if [[ -n "$ANTHROPIC_KEY" ]]; then
             echo "export ANTHROPIC_API_KEY='$ANTHROPIC_KEY'" >> ~/.zshrc
             export ANTHROPIC_API_KEY="$ANTHROPIC_KEY"
-            log "Anthropic API key saved"
+            log "Anthropic API key saved to ~/.zshrc"
         fi
         ;;
     2)
@@ -47,7 +60,7 @@ case "${AI_CHOICE:-4}" in
         if [[ -n "$GOOGLE_KEY" ]]; then
             echo "export GOOGLE_API_KEY='$GOOGLE_KEY'" >> ~/.zshrc
             export GOOGLE_API_KEY="$GOOGLE_KEY"
-            log "Google API key saved"
+            log "Google API key saved to ~/.zshrc"
         fi
         ;;
     3)
@@ -56,7 +69,7 @@ case "${AI_CHOICE:-4}" in
         if [[ -n "$OPENAI_KEY" ]]; then
             echo "export OPENAI_API_KEY='$OPENAI_KEY'" >> ~/.zshrc
             export OPENAI_API_KEY="$OPENAI_KEY"
-            log "OpenAI API key saved"
+            log "OpenAI API key saved to ~/.zshrc"
         fi
         ;;
     4)
@@ -64,33 +77,43 @@ case "${AI_CHOICE:-4}" in
         ;;
 esac
 
-# ── OpenClaw Setup ───────────────────────────────────────
+# ---------------------------------------------------------------------------
+# OpenClaw initial configuration
+# ---------------------------------------------------------------------------
 
 echo ""
 info "Running OpenClaw configuration..."
 if command -v openclaw &>/dev/null; then
     openclaw configure 2>/dev/null || {
-        warn "openclaw configure not available — set up manually"
-        echo "  Run: openclaw gateway start"
+        warn "openclaw configure not available yet"
+        echo "  Start manually with: openclaw gateway start"
     }
 else
     warn "OpenClaw not found in PATH. Try: source ~/.zshrc && openclaw configure"
 fi
 
-# ── Browser ──────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Browser verification
+# ---------------------------------------------------------------------------
 
 echo ""
-info "Testing browser control..."
+info "Checking browser..."
 CHROME=$(which chromium 2>/dev/null || which chromium-browser 2>/dev/null || echo "")
 if [[ -n "$CHROME" ]]; then
-    echo "Chromium found: $CHROME"
-    echo "Version: $($CHROME --version 2>/dev/null)"
+    echo "  Chromium: $CHROME"
+    echo "  Version:  $($CHROME --version 2>/dev/null)"
     log "Browser ready for headless automation"
 else
-    warn "Chromium not found — browser automation won't work"
+    warn "Chromium not found. Browser automation will not work."
 fi
 
-# ── Systemd Service ──────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Systemd service for OpenClaw (auto-start on boot)
+#
+# Creates a user-level systemd unit that starts the OpenClaw gateway
+# in foreground mode. Uses loginctl enable-linger so the service
+# runs even when the user is not logged in.
+# ---------------------------------------------------------------------------
 
 echo ""
 read -p "Enable OpenClaw auto-start on boot? [y/N]: " AUTOSTART
@@ -99,7 +122,7 @@ if [[ "${AUTOSTART:-n}" =~ ^[Yy]$ ]]; then
 
     cat > ~/.config/systemd/user/openclaw.service << EOF
 [Unit]
-Description=OpenClaw AI Agent Gateway
+Description=OpenClaw Agent Gateway
 After=network-online.target
 Wants=network-online.target
 
@@ -120,14 +143,19 @@ EOF
     systemctl --user daemon-reload
     systemctl --user enable openclaw
     loginctl enable-linger "$USER" 2>/dev/null || sudo loginctl enable-linger "$USER"
-    log "OpenClaw service enabled (starts on boot)"
-    echo "  Start now: systemctl --user start openclaw"
-    echo "  View logs: journalctl --user -u openclaw -f"
+    log "OpenClaw service enabled"
+    echo "  Start now:  systemctl --user start openclaw"
+    echo "  View logs:  journalctl --user -u openclaw -f"
 else
-    info "Skipped auto-start. Start manually: openclaw gateway start"
+    info "Skipped. Start manually: openclaw gateway start"
 fi
 
-# ── API Proxy ────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# API Proxy (OpenAI-compatible endpoint on port 11435)
+#
+# Creates a user-level systemd unit for the proxy server. Binds to
+# 0.0.0.0 so any device on the LAN can reach it.
+# ---------------------------------------------------------------------------
 
 echo ""
 read -p "Enable OpenAI-compatible API proxy on port 11435? [Y/n]: " ENABLE_PROXY
@@ -160,39 +188,38 @@ EOF
     systemctl --user start openclaw-proxy 2>/dev/null || true
     log "API proxy enabled on port 11435"
     echo "  Test: curl http://\$(hostname -I | awk '{print \$1}'):11435/health"
-    echo "  Use:  Set OpenAI base_url to http://PI_IP:11435/v1"
+    echo "  Use:  base_url=http://PI_IP:11435/v1 with any OpenAI client"
 else
     info "Skipped API proxy"
 fi
 
-# ── Chat Integration ─────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Chat integration notes
+# ---------------------------------------------------------------------------
 
 echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  📱 Chat Integration (optional)"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "--------------------------------------------"
+echo "  Chat Integration (optional)"
+echo "--------------------------------------------"
 echo ""
 echo "Connect a chat platform to talk to your agent:"
 echo ""
-echo "  Discord:  Create a bot at discord.com/developers"
-echo "            Add token to openclaw config"
-echo ""
-echo "  Telegram: Talk to @BotFather, create bot, get token"
-echo "            Add token to openclaw config"
-echo ""
-echo "  Signal:   Link as secondary device"
+echo "  Discord:   Create a bot at discord.com/developers, add token to openclaw config"
+echo "  Telegram:  Talk to @BotFather, create bot, add token to openclaw config"
+echo "  Signal:    Link as secondary device"
 echo ""
 echo "Configure via: openclaw config"
 echo ""
 
-# ── Done ─────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Done
+# ---------------------------------------------------------------------------
 
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  ✅ Configuration Complete!"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "--------------------------------------------"
+echo "  Configuration Complete"
+echo "--------------------------------------------"
 echo ""
-echo "Quick start:"
-echo "  openclaw gateway start    # Start the agent"
-echo "  openclaw chat             # Interactive chat"
-echo "  openclaw status           # Check status"
+echo "  openclaw gateway start    Start the agent"
+echo "  openclaw chat             Interactive chat"
+echo "  openclaw status           Check status"
 echo ""

@@ -1,41 +1,59 @@
 #!/bin/bash
 #
-# provision.sh — Runs ON THE PI to install all dependencies
+# provision.sh - Install all dependencies on a Raspberry Pi for OpenClaw.
+#
+# This script runs ON THE PI (uploaded via SCP by the openclaw-rpi CLI).
+# It expects Raspberry Pi OS 64-bit Lite (Bookworm) and an arm64 CPU.
+#
+# Environment variables:
+#   SKIP_DOCKER=1      Skip Docker installation
+#   INSTALL_OLLAMA=1   Opt-in: install Ollama for local model inference
+#   OLLAMA_MODELS      Space-separated list of models to pull (requires INSTALL_OLLAMA=1)
 #
 set -euo pipefail
 
-SKIP_OLLAMA="${SKIP_OLLAMA:-0}"
 SKIP_DOCKER="${SKIP_DOCKER:-0}"
+INSTALL_OLLAMA="${INSTALL_OLLAMA:-0}"
 OLLAMA_MODELS="${OLLAMA_MODELS:-qwen2.5:1.5b gemma2:2b}"
 
-log()  { echo -e "\033[0;32m✓\033[0m $*"; }
-info() { echo -e "\033[0;34m→\033[0m $*"; }
-warn() { echo -e "\033[1;33m⚠\033[0m $*"; }
+# ---------------------------------------------------------------------------
+# Output helpers
+# ---------------------------------------------------------------------------
+
+log()  { echo -e "\033[0;32m+\033[0m $*"; }
+info() { echo -e "\033[0;34m>\033[0m $*"; }
+warn() { echo -e "\033[1;33m!\033[0m $*"; }
 
 header() {
     echo ""
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "--------------------------------------------"
     echo "  $*"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "--------------------------------------------"
 }
 
-# ── System Update ──────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# System update
+# ---------------------------------------------------------------------------
 
-header "📦 System Update"
+header "System Update"
 sudo apt-get update -qq
 sudo apt-get upgrade -y -qq
 log "System updated"
 
-# ── Timezone & Locale ──────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Timezone and locale
+# ---------------------------------------------------------------------------
 
-header "⚙️  System Configuration"
+header "System Configuration"
 sudo timedatectl set-timezone America/Los_Angeles 2>/dev/null || true
 sudo raspi-config nonint do_wifi_country US 2>/dev/null || true
-log "Timezone and locale set"
+log "Timezone and locale configured"
 
-# ── Base Packages ──────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Base packages
+# ---------------------------------------------------------------------------
 
-header "📚 Base Packages"
+header "Base Packages"
 sudo apt-get install -y -qq \
     git jq ripgrep curl wget build-essential \
     vim htop tmux \
@@ -44,35 +62,42 @@ sudo apt-get install -y -qq \
     zsh
 log "Base packages installed"
 
-# ── Zsh ────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Zsh + Oh My Zsh
+# ---------------------------------------------------------------------------
 
-header "🐚 Zsh + Oh My Zsh"
+header "Zsh"
 if [[ ! -d "$HOME/.oh-my-zsh" ]]; then
     sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended || true
 fi
 sudo chsh -s "$(which zsh)" "$USER" 2>/dev/null || true
 log "Zsh configured"
 
-# ── Docker ─────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Docker (optional)
+# ---------------------------------------------------------------------------
 
 if [[ "$SKIP_DOCKER" != "1" ]]; then
-    header "🐳 Docker"
+    header "Docker"
     if ! command -v docker &>/dev/null; then
         curl -fsSL https://get.docker.com | sh
         sudo usermod -aG docker "$USER"
-        log "Docker installed (reboot needed for group)"
+        log "Docker installed (reboot required for group membership)"
     else
         log "Docker already installed"
     fi
 fi
 
-# ── Node.js via nvm ───────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Node.js via nvm
+# ---------------------------------------------------------------------------
 
-header "📦 Node.js (via nvm)"
+header "Node.js"
 export NVM_DIR="$HOME/.nvm"
 if [[ ! -d "$NVM_DIR" ]]; then
     curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
 fi
+# shellcheck source=/dev/null
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
 
 nvm install --lts
@@ -80,11 +105,10 @@ nvm use --lts
 nvm alias default node
 log "Node $(node --version) installed"
 
-# npm global without sudo
+# Configure npm global directory to avoid sudo for global installs.
 mkdir -p ~/.npm-global
 npm config set prefix '~/.npm-global'
 
-# Ensure PATH in all shells
 for rc in ~/.zshrc ~/.bashrc; do
     if ! grep -q 'npm-global' "$rc" 2>/dev/null; then
         echo 'export PATH=~/.npm-global/bin:$PATH' >> "$rc"
@@ -92,8 +116,7 @@ for rc in ~/.zshrc ~/.bashrc; do
 done
 export PATH=~/.npm-global/bin:$PATH
 
-# ── NVM in Zsh ─────────────────────────────────────────────
-
+# Ensure nvm loads in zsh sessions.
 if ! grep -q 'NVM_DIR' ~/.zshrc 2>/dev/null; then
     cat >> ~/.zshrc << 'NVMRC'
 
@@ -104,28 +127,36 @@ export NVM_DIR="$HOME/.nvm"
 NVMRC
 fi
 
-# ── OpenClaw ───────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# OpenClaw
+# ---------------------------------------------------------------------------
 
-header "🤖 OpenClaw"
+header "OpenClaw"
 if command -v openclaw &>/dev/null; then
     log "OpenClaw already installed: $(openclaw --version 2>/dev/null || echo 'unknown')"
 else
     info "Installing OpenClaw..."
     curl -fsSL https://openclaw.bot/install.sh | bash || {
-        warn "Installer failed, trying npm..."
+        warn "Installer script failed, falling back to npm..."
         npm install -g openclaw
     }
     log "OpenClaw installed"
 fi
 
-# ── OpenClaw Proxy (OpenAI-compatible API) ─────────────
+# ---------------------------------------------------------------------------
+# OpenClaw Proxy (OpenAI-compatible API)
+#
+# Clones this repo to grab proxy/server.js and proxy/package.json,
+# then copies them to /opt/openclaw-proxy. The proxy exposes the
+# OpenClaw agent as a standard /v1/chat/completions endpoint.
+# ---------------------------------------------------------------------------
 
-header "🔌 OpenClaw Proxy"
+header "OpenClaw Proxy"
 PROXY_DIR="/opt/openclaw-proxy"
 if [[ ! -d "$PROXY_DIR" ]]; then
     sudo mkdir -p "$PROXY_DIR"
     sudo chown "$USER:$USER" "$PROXY_DIR"
-    # Clone just the proxy directory
+
     REPO_TMP=$(mktemp -d)
     git clone --depth 1 https://github.com/hackur/openclaw-on-rpi.git "$REPO_TMP" 2>/dev/null || true
     if [[ -d "$REPO_TMP/proxy" ]]; then
@@ -138,12 +169,16 @@ else
     log "Proxy already installed"
 fi
 
-# ── Ollama (opt-in only) ───────────────────────────────────
-# The Pi calls cloud APIs by default. Ollama is opt-in for
-# offline/private use cases. Enable with INSTALL_OLLAMA=1.
+# ---------------------------------------------------------------------------
+# Ollama (opt-in)
+#
+# The default path uses cloud APIs (Claude, Gemini, OpenAI). Ollama is
+# only installed when explicitly requested via INSTALL_OLLAMA=1. Useful
+# for offline or privacy-sensitive workloads.
+# ---------------------------------------------------------------------------
 
-if [[ "${INSTALL_OLLAMA:-0}" == "1" ]]; then
-    header "🦙 Ollama (Local LLMs — opt-in)"
+if [[ "${INSTALL_OLLAMA}" == "1" ]]; then
+    header "Ollama (opt-in)"
     if ! command -v ollama &>/dev/null; then
         curl -fsSL https://ollama.com/install.sh | sh
     fi
@@ -161,9 +196,11 @@ if [[ "${INSTALL_OLLAMA:-0}" == "1" ]]; then
     log "Models ready"
 fi
 
-# ── Summary ────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Summary
+# ---------------------------------------------------------------------------
 
-header "✅ Provisioning Complete!"
+header "Provisioning Complete"
 echo ""
 echo "Installed:"
 echo "  Node.js:   $(node --version)"
@@ -171,12 +208,12 @@ echo "  npm:       $(npm --version)"
 echo "  Git:       $(git --version | cut -d' ' -f3)"
 echo "  Chromium:  $(chromium --version 2>/dev/null || chromium-browser --version 2>/dev/null || echo 'installed')"
 [[ "$SKIP_DOCKER" != "1" ]] && echo "  Docker:    $(docker --version 2>/dev/null | cut -d' ' -f3 | tr -d ',')"
-[[ "${INSTALL_OLLAMA:-0}" == "1" ]] && echo "  Ollama:    $(ollama --version 2>/dev/null || echo 'installed')"
+[[ "${INSTALL_OLLAMA}" == "1" ]] && echo "  Ollama:    $(ollama --version 2>/dev/null || echo 'installed')"
 echo "  OpenClaw:  $(openclaw --version 2>/dev/null || echo 'installed')"
 echo "  Proxy:     /opt/openclaw-proxy (port 11435)"
 echo "  Shell:     $(zsh --version)"
 echo ""
-echo "The Pi calls cloud AI APIs (Claude, Gemini, OpenAI)."
-echo "It doesn't run models locally — it runs the agent."
+echo "The Pi calls cloud APIs for inference (Claude, Gemini, OpenAI)."
+echo "It doesn't run models locally unless Ollama was explicitly installed."
 echo ""
-echo "⚠ Reboot recommended for Docker group + Zsh changes"
+echo "Reboot recommended for Docker group and Zsh changes."
