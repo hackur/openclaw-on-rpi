@@ -1,93 +1,281 @@
-# OpenClaw on Raspberry Pi
+<div align="center">
 
-One-command provisioning of a Raspberry Pi as a 24/7 OpenClaw AI agent with browser control, chat integrations, and optional local models.
+# 🤖 openclaw-on-rpi
 
-## Requirements
+### Turn a Raspberry Pi into a 24/7 AI agent in one command
 
-- **Mac** with SSH access to the Pi
-- **Raspberry Pi 4B** (4GB+, 8GB recommended for local models)
-- **SD card** flashed with **Raspberry Pi OS 64-bit Lite** (Bookworm)
-- Pi on the same network, SSH enabled
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Shell Script](https://img.shields.io/badge/Shell-Bash-green.svg)](https://www.gnu.org/software/bash/)
+[![Raspberry Pi](https://img.shields.io/badge/Raspberry%20Pi-4B%20%7C%205-C51A4A?logo=raspberrypi&logoColor=white)](https://www.raspberrypi.com/)
+[![OpenClaw](https://img.shields.io/badge/Powered%20by-OpenClaw-blue)](https://openclaw.ai)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/hackur/openclaw-on-rpi/pulls)
 
-## Quick Start
+**One script. One Pi. Always-on AI that browses the web, runs commands, and talks to you on Discord/Telegram/Signal.**
 
-```bash
-# 1. Flash SD card (interactive wizard)
-./openclaw-rpi flash
+[Quick Start](#-quick-start) · [What You Get](#-what-you-get) · [Commands](#-commands) · [FAQ](#-faq) · [Contributing](CONTRIBUTING.md)
 
-# 2. Provision the Pi (installs everything)
-./openclaw-rpi provision 192.168.1.100
+</div>
 
-# 3. Configure OpenClaw (AI provider, chat services)
-./openclaw-rpi configure 192.168.1.100
+---
 
-# 4. Verify everything works
-./openclaw-rpi verify 192.168.1.100
-```
+## Why?
 
-Or do it all at once:
+Cloud AI costs money and goes down. A Raspberry Pi costs $35 and sits on your desk forever.
+
+**openclaw-on-rpi** provisions a Pi as a fully autonomous [OpenClaw](https://openclaw.ai) agent — an AI that can:
+
+- 🌐 **Browse the web** — headless Chromium, click/type/screenshot anything
+- 💬 **Chat with you** — Discord, Telegram, Signal, or SSH
+- 🖥️ **Run commands** — full shell access, Docker, git, the works
+- 🧠 **Think locally** — Ollama with small models for offline/private tasks
+- ⏰ **Work 24/7** — systemd service, auto-restarts, survives reboots
+
+All from one command:
 
 ```bash
 ./openclaw-rpi setup 192.168.1.100
 ```
 
-## What Gets Installed
+## ⚡ Quick Start
 
-| Component | Purpose |
-|-----------|---------|
-| Node.js LTS (via nvm) | OpenClaw runtime |
-| OpenClaw | AI agent framework |
-| Chromium | Headless browser automation |
-| Docker | Container support |
-| Ollama | Local LLM inference (optional) |
-| Zsh + Oh My Zsh | Better shell |
-| git, jq, ripgrep, gh, ffmpeg | Dev tools |
+### Prerequisites
 
-## Commands
+- A **Raspberry Pi 4B** (4GB+) or **Pi 5** with an SD card
+- **Raspberry Pi OS 64-bit Lite** (Bookworm) flashed via [Raspberry Pi Imager](https://www.raspberrypi.com/software/)
+- SSH enabled, Pi on your network
+- A Mac or Linux machine to run the provisioner
+
+### Install
+
+```bash
+git clone https://github.com/hackur/openclaw-on-rpi.git
+cd openclaw-on-rpi
+```
+
+### Flash (guided wizard)
+
+```bash
+./openclaw-rpi flash
+```
+
+### Provision + Configure + Verify
+
+```bash
+# All-in-one (takes ~15 minutes)
+./openclaw-rpi setup 192.168.1.100
+```
+
+Or step by step:
+
+```bash
+./openclaw-rpi provision 192.168.1.100    # Install everything
+./openclaw-rpi configure 192.168.1.100    # Set up AI provider + chat
+./openclaw-rpi verify 192.168.1.100       # Health check
+```
+
+That's it. Your Pi is now an AI agent.
+
+## 📦 What You Get
+
+| Component | Purpose | Size |
+|-----------|---------|------|
+| **OpenClaw** | AI agent runtime | ~50MB |
+| **Node.js LTS** | Runtime (via nvm) | ~80MB |
+| **Chromium** | Headless browser control | ~200MB |
+| **Docker** | Container support | ~300MB |
+| **Ollama** | Local LLM inference | ~200MB |
+| **Zsh + Oh My Zsh** | Better shell | ~30MB |
+| git, jq, rg, gh, ffmpeg | Dev/media tools | ~100MB |
+
+> **Total:** ~1GB installed. Fits easily on a 16GB card with room to spare.
+
+### AI Provider Options
+
+| Provider | Speed on Pi | Cost | Best For |
+|----------|------------|------|----------|
+| **Claude** (Anthropic) | ⚡ Fast (cloud) | API key | Complex reasoning, coding |
+| **Gemini** (Google) | ⚡ Fast (cloud) | Free tier | General tasks, research |
+| **OpenAI** (GPT-4) | ⚡ Fast (cloud) | API key | Broad capability |
+| **Ollama** (local) | 🐢 Slow-ish | Free | Privacy, offline use |
+
+> 💡 **Recommendation:** Use Claude or Gemini for heavy tasks, Ollama for quick local queries.
+
+## 🎮 Commands
 
 ```
-openclaw-rpi flash              Interactive SD card flashing guide
-openclaw-rpi provision <ip>     Install all dependencies on the Pi
-openclaw-rpi configure <ip>     Configure OpenClaw (AI provider, chat, browser)
-openclaw-rpi verify <ip>        Health check — verify everything works
-openclaw-rpi setup <ip>         Full pipeline: provision + configure + verify
+openclaw-rpi flash              Guided SD card flashing
+openclaw-rpi provision <ip>     Install all dependencies
+openclaw-rpi configure <ip>     Interactive AI + chat setup
+openclaw-rpi verify <ip>        Health check (all green = good)
+openclaw-rpi setup <ip>         Full pipeline (provision + configure + verify)
 openclaw-rpi ssh <ip>           SSH into the Pi
-openclaw-rpi status <ip>        Check OpenClaw service status
-openclaw-rpi logs <ip>          Tail OpenClaw logs
-openclaw-rpi update <ip>        Update OpenClaw + system packages
+openclaw-rpi status <ip>        System + OpenClaw status
+openclaw-rpi logs <ip>          Tail agent logs
+openclaw-rpi update <ip>        Update everything
 openclaw-rpi browser-test <ip>  Test headless Chromium
 ```
 
-## Configuration
+## ⚙️ Configuration
 
-Set environment variables or pass as flags:
+Override defaults with environment variables:
 
 ```bash
-export PI_USER=pi              # SSH username (default: pi)
-export PI_HOSTNAME=openclaw-pi # Pi hostname (default: openclaw-pi)
-export WIFI_SSID=MyNetwork     # For flash wizard
-export WIFI_PASSWORD=secret    # For flash wizard
-export OLLAMA_MODELS="qwen2.5:1.5b gemma2:2b"  # Models to pull
-export SKIP_OLLAMA=1           # Skip Ollama install
-export SKIP_DOCKER=1           # Skip Docker install
+export PI_USER=pi                                    # SSH username
+export PI_HOSTNAME=openclaw-pi                       # Hostname
+export OLLAMA_MODELS="qwen2.5:1.5b gemma2:2b"       # Models to pull
+export SKIP_OLLAMA=1                                 # Skip Ollama
+export SKIP_DOCKER=1                                 # Skip Docker
 ```
 
-## Performance Notes
+## 🏗️ Architecture
 
-- Use cloud APIs (Claude/Gemini) for complex tasks — much faster than local models
-- Local models (qwen2.5:1.5b) work but are slow on 4GB RAM
-- Chromium headless is well-optimized on ARM64
-- Browser automation uses the isolated `openclaw` profile
+```
+┌─────────────────────────────────────────────────┐
+│                  Your Mac/PC                     │
+│                                                  │
+│   ./openclaw-rpi setup <ip>                      │
+│        │                                         │
+│        │ SSH                                     │
+│        ▼                                         │
+│   ┌─────────────────────────────────────────┐    │
+│   │          Raspberry Pi                    │    │
+│   │                                          │    │
+│   │   ┌──────────┐  ┌───────────────────┐   │    │
+│   │   │ OpenClaw │──│ Chromium (headless)│   │    │
+│   │   │  Agent   │  └───────────────────┘   │    │
+│   │   │          │  ┌───────────────────┐   │    │
+│   │   │  Claude  │──│ Shell / Docker    │   │    │
+│   │   │  Gemini  │  └───────────────────┘   │    │
+│   │   │  Ollama  │  ┌───────────────────┐   │    │
+│   │   │          │──│ Discord/Telegram  │   │    │
+│   │   └──────────┘  └───────────────────┘   │    │
+│   └─────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────┘
+```
 
-## Troubleshooting
+## 🔧 What It Actually Does
+
+<details>
+<summary><strong>Click to see the full provisioning steps</strong></summary>
+
+1. **System update** — `apt upgrade` to latest
+2. **Base packages** — git, jq, ripgrep, curl, build-essential, gh, ffmpeg, tmux, htop
+3. **Chromium** — headless browser for web automation
+4. **Zsh + Oh My Zsh** — better shell experience
+5. **Docker** — container runtime (optional, `SKIP_DOCKER=1` to skip)
+6. **Node.js LTS** — via nvm, with npm global directory configured
+7. **OpenClaw** — AI agent framework
+8. **Ollama** — local LLM runtime + small models (optional, `SKIP_OLLAMA=1` to skip)
+9. **Systemd service** — auto-start on boot (optional during configure)
+
+</details>
+
+## 💡 Use Cases
+
+- **Home automation assistant** — "Check if my package shipped" → browses tracking site
+- **Discord/Telegram bot** — always-on AI in your server with real browser access
+- **Dev assistant** — monitors repos, runs tests, manages deployments
+- **Research agent** — scrapes sites, summarizes content, saves to files
+- **Security monitor** — watches logs, checks for anomalies, alerts you
+- **Personal API** — SSH in and ask questions from your phone
+
+## ❓ FAQ
+
+<details>
+<summary><strong>Will it work on a Pi 3?</strong></summary>
+
+Not recommended. Pi 3 is 32-bit and only has 1GB RAM. You'll hit memory limits quickly, especially with Chromium. Pi 4B with 4GB+ is the minimum.
+</details>
+
+<details>
+<summary><strong>Does it work on Pi 5?</strong></summary>
+
+Yes! Pi 5 is even better — faster CPU, more RAM options. The provisioner works the same way.
+</details>
+
+<details>
+<summary><strong>Can I run it headless (no monitor)?</strong></summary>
+
+That's the intended use. Flash the SD card with SSH enabled, find the Pi's IP, and provision over the network. No monitor needed.
+</details>
+
+<details>
+<summary><strong>How much does it cost to run?</strong></summary>
+
+Hardware: ~$35-80 for the Pi. Power: ~$5/year. AI API: depends on usage (Claude/Gemini have free tiers or pay-per-use). Ollama: completely free but slower.
+</details>
+
+<details>
+<summary><strong>Can I provision from Linux?</strong></summary>
+
+The provisioner should work from any machine with SSH and SCP. It's been tested on macOS. Linux should work — PRs welcome if you find issues.
+</details>
+
+<details>
+<summary><strong>Can I provision multiple Pis?</strong></summary>
+
+Yes! Run `./openclaw-rpi setup <ip>` for each one. Each Pi gets its own independent agent.
+</details>
+
+<details>
+<summary><strong>What if I lose power?</strong></summary>
+
+If you enabled the systemd service during configuration, OpenClaw auto-starts on boot. Your agent comes back online within ~30 seconds of power restoration.
+</details>
+
+## 🐛 Troubleshooting
 
 ```bash
 # Can't find Pi on network
 arp -na | grep -i "b8:27:eb\|dc:a6:32\|e4:5f:01\|2c:cf:67\|d8:3a:dd"
 
+# Or try mDNS
+ping openclaw-pi.local
+
 # Browser won't start
 ./openclaw-rpi ssh <ip> "chromium --headless --disable-gpu --dump-dom https://example.com"
 
-# Check resources
-./openclaw-rpi ssh <ip> "free -h && df -h && uptime"
+# Check system resources
+./openclaw-rpi status <ip>
+
+# View agent logs
+./openclaw-rpi logs <ip>
 ```
+
+## 🗺️ Roadmap
+
+- [x] One-command provisioning
+- [x] AI provider setup (Claude, Gemini, OpenAI, Ollama)
+- [x] Headless browser automation
+- [x] Systemd auto-start
+- [ ] Pi 5 optimized path
+- [ ] Fleet provisioning (multiple Pis at once)
+- [ ] Ansible playbook alternative
+- [ ] Pre-built SD card images
+- [ ] Pi Zero 2 W support (minimal mode)
+- [ ] Web dashboard for management
+- [ ] OTA updates
+
+## 🤝 Contributing
+
+Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+**Areas that need help:**
+- Testing on Pi 5 and other ARM SBCs
+- Non-Mac provisioning (Linux, WSL)
+- Ollama model benchmarks on different Pi models
+- Chat integration setup guides
+
+## 📜 License
+
+[MIT](LICENSE) — do whatever you want with it.
+
+---
+
+<div align="center">
+
+**Built with [OpenClaw](https://openclaw.ai) · Made for [Raspberry Pi](https://raspberrypi.com)**
+
+If this saved you time, give it a ⭐
+
+</div>
