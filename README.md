@@ -30,6 +30,8 @@ Cloud AI costs money and goes down. A Raspberry Pi costs $35 and sits on your de
 - 🧠 **Think locally** — Ollama with small models for offline/private tasks
 - ⏰ **Work 24/7** — systemd service, auto-restarts, survives reboots
 
+- 🔌 **Expose an API** — OpenAI-compatible endpoint on your local network
+
 All from one command:
 
 ```bash
@@ -85,6 +87,7 @@ That's it. Your Pi is now an AI agent.
 | **Docker** | Container support | ~300MB |
 | **Ollama** | Local LLM inference | ~200MB |
 | **Zsh + Oh My Zsh** | Better shell | ~30MB |
+| **openclaw-proxy** | OpenAI-compatible API server | ~1MB |
 | git, jq, rg, gh, ffmpeg | Dev/media tools | ~100MB |
 
 > **Total:** ~1GB installed. Fits easily on a 16GB card with room to spare.
@@ -130,27 +133,35 @@ export SKIP_DOCKER=1                                 # Skip Docker
 ## 🏗️ Architecture
 
 ```
-┌─────────────────────────────────────────────────┐
-│                  Your Mac/PC                     │
-│                                                  │
-│   ./openclaw-rpi setup <ip>                      │
-│        │                                         │
-│        │ SSH                                     │
-│        ▼                                         │
-│   ┌─────────────────────────────────────────┐    │
-│   │          Raspberry Pi                    │    │
-│   │                                          │    │
-│   │   ┌──────────┐  ┌───────────────────┐   │    │
-│   │   │ OpenClaw │──│ Chromium (headless)│   │    │
-│   │   │  Agent   │  └───────────────────┘   │    │
-│   │   │          │  ┌───────────────────┐   │    │
-│   │   │  Claude  │──│ Shell / Docker    │   │    │
-│   │   │  Gemini  │  └───────────────────┘   │    │
-│   │   │  Ollama  │  ┌───────────────────┐   │    │
-│   │   │          │──│ Discord/Telegram  │   │    │
-│   │   └──────────┘  └───────────────────┘   │    │
-│   └─────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────┐
+│                    Your Network                            │
+│                                                            │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐                │
+│  │  Laptop  │  │  Phone   │  │ Open     │  Any device     │
+│  │  Script  │  │  App     │  │ WebUI    │  on your LAN    │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘                │
+│       │              │              │                      │
+│       └──────────────┼──────────────┘                      │
+│                      │ OpenAI API (:11435)                 │
+│                      ▼                                     │
+│   ┌──────────────────────────────────────────────┐        │
+│   │              Raspberry Pi                     │        │
+│   │                                               │        │
+│   │   ┌────────────────┐                          │        │
+│   │   │ openclaw-proxy │ ← OpenAI + Ollama API   │        │
+│   │   └───────┬────────┘                          │        │
+│   │           │                                   │        │
+│   │   ┌───────▼────────┐  ┌──────────────────┐   │        │
+│   │   │    OpenClaw    │──│ Chromium (headless│   │        │
+│   │   │     Agent      │  └──────────────────┘   │        │
+│   │   │                │  ┌──────────────────┐   │        │
+│   │   │  Claude/Gemini │──│ Shell / Docker   │   │        │
+│   │   │  Ollama local  │  └──────────────────┘   │        │
+│   │   │                │  ┌──────────────────┐   │        │
+│   │   │                │──│ Discord/Telegram │   │        │
+│   │   └────────────────┘  └──────────────────┘   │        │
+│   └──────────────────────────────────────────────┘        │
+└───────────────────────────────────────────────────────────┘
 ```
 
 ## 🔧 What It Actually Does
@@ -169,6 +180,31 @@ export SKIP_DOCKER=1                                 # Skip Docker
 9. **Systemd service** — auto-start on boot (optional during configure)
 
 </details>
+
+## 🔌 Local AI API (OpenAI-compatible)
+
+The killer feature: your Pi exposes an **OpenAI-compatible API** on your local network. Any app, script, or UI that speaks OpenAI can use your agent.
+
+```bash
+# From any device on your network
+curl http://YOUR_PI_IP:11435/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"openclaw-agent","messages":[{"role":"user","content":"Search for the latest news"}]}'
+```
+
+```python
+# Python — just change the base URL
+from openai import OpenAI
+client = OpenAI(base_url="http://YOUR_PI_IP:11435/v1", api_key="not-needed")
+response = client.chat.completions.create(
+    model="openclaw-agent",
+    messages=[{"role": "user", "content": "Browse example.com and summarize it"}]
+)
+```
+
+Works with **Open WebUI**, **TypingMind**, **Chatbox**, **any OpenAI SDK**, and even **Ollama-compatible clients**. It's not just a language model — it's a full agent with browser, shell, and tool access behind a standard API.
+
+> See [proxy/README.md](proxy/README.md) for full documentation.
 
 ## 💡 Use Cases
 

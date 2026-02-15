@@ -118,6 +118,26 @@ else
     log "OpenClaw installed"
 fi
 
+# ── OpenClaw Proxy (OpenAI-compatible API) ─────────────
+
+header "🔌 OpenClaw Proxy"
+PROXY_DIR="/opt/openclaw-proxy"
+if [[ ! -d "$PROXY_DIR" ]]; then
+    sudo mkdir -p "$PROXY_DIR"
+    sudo chown "$USER:$USER" "$PROXY_DIR"
+    # Clone just the proxy directory
+    REPO_TMP=$(mktemp -d)
+    git clone --depth 1 https://github.com/hackur/openclaw-on-rpi.git "$REPO_TMP" 2>/dev/null || true
+    if [[ -d "$REPO_TMP/proxy" ]]; then
+        cp "$REPO_TMP/proxy/server.js" "$PROXY_DIR/"
+        cp "$REPO_TMP/proxy/package.json" "$PROXY_DIR/"
+    fi
+    rm -rf "$REPO_TMP"
+    log "Proxy installed at $PROXY_DIR"
+else
+    log "Proxy already installed"
+fi
+
 # ── Ollama ─────────────────────────────────────────────────
 
 if [[ "$SKIP_OLLAMA" != "1" ]]; then

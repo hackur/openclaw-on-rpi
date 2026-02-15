@@ -132,6 +132,44 @@ else
     info "Skipped auto-start. Start manually: openclaw gateway start"
 fi
 
+# ── API Proxy ────────────────────────────────────────
+
+echo ""
+read -p "Enable OpenAI-compatible API proxy on port 11435? [Y/n]: " ENABLE_PROXY
+if [[ "${ENABLE_PROXY:-y}" =~ ^[Yy]$ ]] || [[ -z "$ENABLE_PROXY" ]]; then
+    mkdir -p ~/.config/systemd/user
+
+    NVM_NODE="$HOME/.nvm/versions/node/$(node --version)/bin"
+    cat > ~/.config/systemd/user/openclaw-proxy.service << EOF
+[Unit]
+Description=OpenClaw API Proxy (OpenAI-compatible)
+After=network-online.target openclaw.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=$NVM_NODE/node /opt/openclaw-proxy/server.js
+Restart=on-failure
+RestartSec=5
+Environment=PORT=11435
+Environment=BIND=0.0.0.0
+Environment=PATH=$NVM_NODE:/usr/local/bin:/usr/bin:/bin
+WorkingDirectory=/opt/openclaw-proxy
+
+[Install]
+WantedBy=default.target
+EOF
+
+    systemctl --user daemon-reload
+    systemctl --user enable openclaw-proxy
+    systemctl --user start openclaw-proxy 2>/dev/null || true
+    log "API proxy enabled on port 11435"
+    echo "  Test: curl http://\$(hostname -I | awk '{print \$1}'):11435/health"
+    echo "  Use:  Set OpenAI base_url to http://PI_IP:11435/v1"
+else
+    info "Skipped API proxy"
+fi
+
 # ── Chat Integration ─────────────────────────────────────
 
 echo ""

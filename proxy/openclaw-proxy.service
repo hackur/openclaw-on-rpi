@@ -1,0 +1,18 @@
+[Unit]
+Description=OpenClaw API Proxy (OpenAI-compatible)
+After=network-online.target openclaw.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/env node /opt/openclaw-proxy/server.js
+Restart=on-failure
+RestartSec=5
+Environment=PORT=11435
+Environment=BIND=0.0.0.0
+Environment=OPENCLAW_HOST=127.0.0.1
+Environment=OPENCLAW_PORT=18800
+WorkingDirectory=/opt/openclaw-proxy
+
+[Install]
+WantedBy=default.target
