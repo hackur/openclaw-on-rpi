@@ -11,8 +11,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PI_USER="${PI_USER:-pi}"
 PI_HOSTNAME="${PI_HOSTNAME:-openclaw-pi}"
 OLLAMA_MODELS="${OLLAMA_MODELS:-qwen2.5:1.5b gemma2:2b}"
-SKIP_OLLAMA="${SKIP_OLLAMA:-0}"
 SKIP_DOCKER="${SKIP_DOCKER:-0}"
+INSTALL_OLLAMA="${INSTALL_OLLAMA:-0}"
 
 # Colors
 RED='\033[0;31m'
@@ -105,7 +105,7 @@ cmd_provision() {
     scp_to "$ip" "$SCRIPT_DIR/scripts/provision.sh" "/tmp/openclaw-provision.sh"
 
     info "Running provisioning (this takes 10-15 minutes)..."
-    ssh_cmd "$ip" "SKIP_OLLAMA=$SKIP_OLLAMA SKIP_DOCKER=$SKIP_DOCKER OLLAMA_MODELS='$OLLAMA_MODELS' bash /tmp/openclaw-provision.sh"
+    ssh_cmd "$ip" "SKIP_DOCKER=$SKIP_DOCKER INSTALL_OLLAMA=$INSTALL_OLLAMA OLLAMA_MODELS='$OLLAMA_MODELS' bash /tmp/openclaw-provision.sh"
 
     log "Provisioning complete!"
     warn "The Pi needs to reboot for group changes (docker, zsh). Rebooting..."
@@ -156,7 +156,7 @@ cmd_verify() {
         check "Docker running"    "docker ps"
     fi
 
-    if [[ "$SKIP_OLLAMA" != "1" ]]; then
+    if [[ "${INSTALL_OLLAMA:-0}" == "1" ]]; then
         check "Ollama installed"  "which ollama"
         check "Ollama running"    "curl -sf http://localhost:11434/api/tags"
     fi
@@ -279,9 +279,9 @@ ${BOLD}COMMANDS${NC}
 ${BOLD}ENVIRONMENT${NC}
     PI_USER              SSH username (default: pi)
     PI_HOSTNAME          Pi hostname (default: openclaw-pi)
-    SKIP_OLLAMA=1        Skip Ollama installation
     SKIP_DOCKER=1        Skip Docker installation
-    OLLAMA_MODELS        Space-separated models to pull (default: qwen2.5:1.5b gemma2:2b)
+    INSTALL_OLLAMA=1     Opt-in to install Ollama for local models
+    OLLAMA_MODELS        Space-separated models to pull (if Ollama enabled)
 
 ${BOLD}EXAMPLES${NC}
     openclaw-rpi setup 192.168.1.100

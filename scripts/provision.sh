@@ -138,16 +138,17 @@ else
     log "Proxy already installed"
 fi
 
-# ── Ollama ─────────────────────────────────────────────────
+# ── Ollama (opt-in only) ───────────────────────────────────
+# The Pi calls cloud APIs by default. Ollama is opt-in for
+# offline/private use cases. Enable with INSTALL_OLLAMA=1.
 
-if [[ "$SKIP_OLLAMA" != "1" ]]; then
-    header "🦙 Ollama (Local LLMs)"
+if [[ "${INSTALL_OLLAMA:-0}" == "1" ]]; then
+    header "🦙 Ollama (Local LLMs — opt-in)"
     if ! command -v ollama &>/dev/null; then
         curl -fsSL https://ollama.com/install.sh | sh
     fi
     log "Ollama installed"
 
-    # Start ollama in background if not running
     if ! pgrep -x ollama &>/dev/null; then
         ollama serve &>/dev/null &
         sleep 3
@@ -170,8 +171,12 @@ echo "  npm:       $(npm --version)"
 echo "  Git:       $(git --version | cut -d' ' -f3)"
 echo "  Chromium:  $(chromium --version 2>/dev/null || chromium-browser --version 2>/dev/null || echo 'installed')"
 [[ "$SKIP_DOCKER" != "1" ]] && echo "  Docker:    $(docker --version 2>/dev/null | cut -d' ' -f3 | tr -d ',')"
-[[ "$SKIP_OLLAMA" != "1" ]] && echo "  Ollama:    $(ollama --version 2>/dev/null || echo 'installed')"
+[[ "${INSTALL_OLLAMA:-0}" == "1" ]] && echo "  Ollama:    $(ollama --version 2>/dev/null || echo 'installed')"
 echo "  OpenClaw:  $(openclaw --version 2>/dev/null || echo 'installed')"
+echo "  Proxy:     /opt/openclaw-proxy (port 11435)"
 echo "  Shell:     $(zsh --version)"
+echo ""
+echo "The Pi calls cloud AI APIs (Claude, Gemini, OpenAI)."
+echo "It doesn't run models locally — it runs the agent."
 echo ""
 echo "⚠ Reboot recommended for Docker group + Zsh changes"

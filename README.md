@@ -27,7 +27,7 @@ Cloud AI costs money and goes down. A Raspberry Pi costs $35 and sits on your de
 - 🌐 **Browse the web** — headless Chromium, click/type/screenshot anything
 - 💬 **Chat with you** — Discord, Telegram, Signal, or SSH
 - 🖥️ **Run commands** — full shell access, Docker, git, the works
-- 🧠 **Think locally** — Ollama with small models for offline/private tasks
+- 🧠 **Use any AI** — Claude, Gemini, OpenAI — calls cloud APIs, runs locally
 - ⏰ **Work 24/7** — systemd service, auto-restarts, survives reboots
 
 - 🔌 **Expose an API** — OpenAI-compatible endpoint on your local network
@@ -85,23 +85,23 @@ That's it. Your Pi is now an AI agent.
 | **Node.js LTS** | Runtime (via nvm) | ~80MB |
 | **Chromium** | Headless browser control | ~200MB |
 | **Docker** | Container support | ~300MB |
-| **Ollama** | Local LLM inference | ~200MB |
 | **Zsh + Oh My Zsh** | Better shell | ~30MB |
 | **openclaw-proxy** | OpenAI-compatible API server | ~1MB |
 | git, jq, rg, gh, ffmpeg | Dev/media tools | ~100MB |
 
-> **Total:** ~1GB installed. Fits easily on a 16GB card with room to spare.
+> **Total:** ~600MB without Docker. Fits easily on a 16GB card.
 
-### AI Provider Options
+### AI Providers
 
-| Provider | Speed on Pi | Cost | Best For |
-|----------|------------|------|----------|
-| **Claude** (Anthropic) | ⚡ Fast (cloud) | API key | Complex reasoning, coding |
-| **Gemini** (Google) | ⚡ Fast (cloud) | Free tier | General tasks, research |
-| **OpenAI** (GPT-4) | ⚡ Fast (cloud) | API key | Broad capability |
-| **Ollama** (local) | 🐢 Slow-ish | Free | Privacy, offline use |
+The Pi doesn't run models — it *calls* them. All inference happens in the cloud. The Pi is the always-on agent that orchestrates everything.
 
-> 💡 **Recommendation:** Use Claude or Gemini for heavy tasks, Ollama for quick local queries.
+| Provider | Cost | Best For |
+|----------|------|----------|
+| **Claude** (Anthropic) | API key | Complex reasoning, coding, tool use |
+| **Gemini** (Google) | Free tier available | General tasks, research |
+| **OpenAI** (GPT-4) | API key | Broad capability |
+
+> 💡 **The Pi's job is execution, not inference.** It calls whichever cloud AI you configure, then acts on the response — browsing, running commands, sending messages. That's what makes it powerful on $35 hardware.
 
 ## 🎮 Commands
 
@@ -125,9 +125,9 @@ Override defaults with environment variables:
 ```bash
 export PI_USER=pi                                    # SSH username
 export PI_HOSTNAME=openclaw-pi                       # Hostname
-export OLLAMA_MODELS="qwen2.5:1.5b gemma2:2b"       # Models to pull
-export SKIP_OLLAMA=1                                 # Skip Ollama
 export SKIP_DOCKER=1                                 # Skip Docker
+export INSTALL_OLLAMA=1                              # Opt-in: local models via Ollama
+export OLLAMA_MODELS="qwen2.5:1.5b gemma2:2b"       # Models (if Ollama enabled)
 ```
 
 ## 🏗️ Architecture
@@ -176,7 +176,7 @@ export SKIP_DOCKER=1                                 # Skip Docker
 5. **Docker** — container runtime (optional, `SKIP_DOCKER=1` to skip)
 6. **Node.js LTS** — via nvm, with npm global directory configured
 7. **OpenClaw** — AI agent framework
-8. **Ollama** — local LLM runtime + small models (optional, `SKIP_OLLAMA=1` to skip)
+8. **Ollama** — local LLM runtime (opt-in with `INSTALL_OLLAMA=1`)
 9. **Systemd service** — auto-start on boot (optional during configure)
 
 </details>

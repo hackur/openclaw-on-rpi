@@ -21,17 +21,17 @@ echo ""
 
 # ── AI Provider ──────────────────────────────────────────
 
-echo "Select your AI provider:"
+echo "The Pi calls cloud AI APIs — it doesn't run models locally."
+echo "Choose your provider (you can add more later):"
 echo ""
 echo "  1) Claude (Anthropic) — Most capable, recommended"
 echo "  2) Gemini (Google)    — Free tier available"
-echo "  3) OpenAI (GPT-4)    — Widely supported"
-echo "  4) Ollama (Local)    — Private, no API key needed"
-echo "  5) Skip for now"
+echo "  3) OpenAI (GPT-4o)   — Widely supported"
+echo "  4) Skip for now"
 echo ""
-read -p "Choice [1-5]: " AI_CHOICE
+read -p "Choice [1-4]: " AI_CHOICE
 
-case "${AI_CHOICE:-5}" in
+case "${AI_CHOICE:-4}" in
     1)
         info "Setting up Claude..."
         read -p "Anthropic API key: " ANTHROPIC_KEY
@@ -60,11 +60,6 @@ case "${AI_CHOICE:-5}" in
         fi
         ;;
     4)
-        info "Using Ollama (local models)"
-        echo "Available models:"
-        ollama list 2>/dev/null || warn "Ollama not running — start with: ollama serve"
-        ;;
-    5)
         info "Skipping AI provider setup"
         ;;
 esac
